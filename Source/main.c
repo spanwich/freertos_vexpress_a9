@@ -1,6 +1,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include <stddef.h>
+#include <stdint.h>
 
 // PL011 UART registers - matching the original vm_freertos example
 #define UART0_DR (*(volatile unsigned int *)0x9000000)   // Data register
@@ -145,6 +146,88 @@ void vSetupTickInterrupt(void) {
     uart_puts("vSetupTickInterrupt called - timer stub\r\n");
 }
 
+// Memory pattern painting task
+void vMemoryPatternTask(void *pvParameters) {
+    static unsigned int pattern_counter = 0;
+    
+    // Define memory region to paint (1MB starting at heap area)
+    volatile uint32_t *memory_base = (volatile uint32_t *)0x42000000;  // Safe area after guest base
+    const size_t memory_size = 1024 * 1024; // 1MB
+    const size_t word_count = memory_size / sizeof(uint32_t);
+    
+    uart_puts("=== MEMORY PATTERN PAINTING TASK ===\r\n");
+    uart_puts("Memory base: 0x");
+    uart_hex((unsigned int)memory_base);
+    uart_puts("\r\n");
+    uart_puts("Size: ");
+    uart_decimal(memory_size);
+    uart_puts(" bytes (");
+    uart_decimal(word_count);
+    uart_puts(" words)\r\n");
+    
+    for (;;) {
+        // Create different patterns each iteration
+        uint32_t pattern;
+        const char *pattern_name;
+        
+        switch (pattern_counter % 4) {
+            case 0:
+                pattern = 0xDEADBEEF;
+                pattern_name = "DEADBEEF";
+                break;
+            case 1:
+                pattern = 0xCAFEBABE;
+                pattern_name = "CAFEBABE";
+                break;
+            case 2:
+                pattern = 0x12345678;
+                pattern_name = "12345678";
+                break;
+            case 3:
+                pattern = 0xAA55AA55;
+                pattern_name = "AA55AA55";
+                break;
+        }
+        
+        uart_puts("Painting memory with pattern: 0x");
+        uart_puts(pattern_name);
+        uart_puts("\r\n");
+        
+        // Paint memory with pattern
+        for (size_t i = 0; i < word_count; i++) {
+            memory_base[i] = pattern;
+            
+            // Progress indicator every 64K words
+            if ((i % (16384)) == 0) {
+                uart_puts("Progress: ");
+                uart_decimal((i * 100) / word_count);
+                uart_puts("%\r\n");
+            }
+        }
+        
+        uart_puts("Memory painting complete. Pattern: 0x");
+        uart_puts(pattern_name);
+        uart_puts("\r\n");
+        
+        // Verify a few locations
+        uart_puts("Verification samples:\r\n");
+        for (int j = 0; j < 5; j++) {
+            size_t offset = j * (word_count / 5);
+            uart_puts("  [");
+            uart_decimal(offset);
+            uart_puts("]: 0x");
+            uart_hex(memory_base[offset]);
+            uart_puts("\r\n");
+        }
+        
+        pattern_counter++;
+        
+        // Wait longer to allow memory dump
+        uart_puts("Waiting 10 seconds for memory dump...\r\n");
+        vTaskDelay(pdMS_TO_TICKS(10000));  // 10 second delay
+    }
+}
+
 void vPLCMain(void *pvParameters) {
     unsigned int counter = 0;
     
@@ -158,7 +241,7 @@ void vPLCMain(void *pvParameters) {
         uart_puts("\r\n");
         
         counter++;
-        vTaskDelay(pdMS_TO_TICKS(2000));  // 2 second delay
+        vTaskDelay(pdMS_TO_TICKS(5000));  // 5 second delay (longer to not interfere)
     }
 }
 
@@ -186,14 +269,19 @@ int main(void) {
     uart_puts("\r\n");
     
     // Create multiple tasks like a real system
-    BaseType_t result1 = xTaskCreate(vPLCMain, "PLC", configMINIMAL_STACK_SIZE * 2, NULL, 2, NULL);
-    uart_puts("PLC task creation result: ");
+    BaseType_t result1 = xTaskCreate(vMemoryPatternTask, "MemPattern", configMINIMAL_STACK_SIZE * 4, NULL, 3, NULL);
+    uart_puts("Memory Pattern task creation result: ");
     uart_decimal(result1);
     uart_puts("\r\n");
     
-    BaseType_t result2 = xTaskCreate(vDemoTask, "Demo", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-    uart_puts("Demo task creation result: ");
+    BaseType_t result2 = xTaskCreate(vPLCMain, "PLC", configMINIMAL_STACK_SIZE * 2, NULL, 2, NULL);
+    uart_puts("PLC task creation result: ");
     uart_decimal(result2);
+    uart_puts("\r\n");
+    
+    BaseType_t result3 = xTaskCreate(vDemoTask, "Demo", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+    uart_puts("Demo task creation result: ");
+    uart_decimal(result3);
     uart_puts("\r\n");
     
     uart_puts("Starting FreeRTOS scheduler...\r\n");
