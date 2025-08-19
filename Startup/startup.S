@@ -8,6 +8,15 @@ _start:
     cps #0x13          @ Switch to SVC mode (supervisor)
     ldr sp, =stack_top
     
+    @ Initialize BSS section (zero out uninitialized data including FreeRTOS heap)
+    ldr r0, =__bss_start__
+    ldr r1, =__bss_end__
+    mov r2, #0
+bss_clear_loop:
+    cmp r0, r1
+    strcc r2, [r0], #4
+    bcc bss_clear_loop
+    
     @ Call main function
     b main
 

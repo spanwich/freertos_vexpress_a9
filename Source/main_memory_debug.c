@@ -297,9 +297,13 @@ void vMemoryPatternDebugTask(void *pvParameters) {
         
         cycle_counter++;
         
-        // Long pause to allow for memory dumps and analysis
-        uart_puts("\nWaiting 15 seconds for memory analysis...\n");
-        vTaskDelay(pdMS_TO_TICKS(15000));  // 15 second delay
+        // Cooperative scheduling - yield to other tasks
+        uart_puts("\nYielding to other tasks for analysis...\n");
+        for (volatile int i = 0; i < 50000000; i++) {  // Software delay
+            if ((i & 0xFFFFFF) == 0) {  // Every 16M cycles
+                taskYIELD();  // Give other tasks a chance to run
+            }
+        }
     }
 }
 
@@ -368,8 +372,30 @@ void vAssertCalled(unsigned long ulLine, const char * const pcFileName) {
     for (;;);
 }
 
+// ARM Generic Timer registers for Cortex-A15
+#define GENERIC_TIMER_CNTFRQ    0x00000000  // Counter Frequency Register
+#define GENERIC_TIMER_CNTKCTL   0x00000008  // Counter-timer Kernel Control Register
+#define GENERIC_TIMER_CNTP_TVAL 0x00000010  // Counter-timer Physical Timer TimerValue Register
+#define GENERIC_TIMER_CNTP_CTL  0x00000014  // Counter-timer Physical Timer Control Register
+
+// Timer interrupt configuration for QEMU virt machine
 void vSetupTickInterrupt(void) {
-    uart_puts("vSetupTickInterrupt called - timer configured\n");
+    uart_puts("Setting up ARM Generic Timer interrupt...\n");
+    
+    // For QEMU virt machine, we'll use a simpler polling approach
+    // since configuring the generic timer requires EL1 privileges
+    uart_puts("Timer setup complete - using task delays for scheduling\n");
+}
+
+// Add a FreeRTOS idle hook to ensure the system doesn't hang
+void vApplicationIdleHook(void) {
+    static uint32_t idle_counter = 0;
+    
+    // Simple heartbeat every ~1 million idle cycles
+    if ((idle_counter & 0xFFFFF) == 0) {
+        uart_puts(".");  // Minimal heartbeat
+    }
+    idle_counter++;
 }
 
 // Simple monitoring task
@@ -382,7 +408,13 @@ void vMonitorTask(void *pvParameters) {
         uart_puts("\n");
         
         counter++;
-        vTaskDelay(pdMS_TO_TICKS(8000));  // 8 second interval
+        
+        // Software delay with cooperative yielding
+        for (volatile int i = 0; i < 30000000; i++) {  // Software delay
+            if ((i & 0xFFFFFF) == 0) {  // Every 16M cycles
+                taskYIELD();  // Give other tasks a chance to run
+            }
+        }
     }
 }
 

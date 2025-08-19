@@ -268,21 +268,101 @@ int main(void) {
     uart_hex((unsigned int)vDemoTask);
     uart_puts("\r\n");
     
-    // Create multiple tasks like a real system
-    BaseType_t result1 = xTaskCreate(vMemoryPatternTask, "MemPattern", configMINIMAL_STACK_SIZE * 4, NULL, 3, NULL);
-    uart_puts("Memory Pattern task creation result: ");
-    uart_decimal(result1);
+    // Check initial heap status
+    uart_puts("=== HEAP STATUS BEFORE TASK CREATION ===\r\n");
+    
+    uart_puts("configTOTAL_HEAP_SIZE: ");
+    uart_decimal(configTOTAL_HEAP_SIZE);
+    uart_puts(" bytes\r\n");
+    
+    // Test basic memory access before trying FreeRTOS heap
+    uart_puts("Testing basic memory access...\r\n");
+    volatile uint32_t *test_addr = (volatile uint32_t *)0x4001D000;  // Should be in BSS area
+    *test_addr = 0x12345678;
+    uint32_t read_val = *test_addr;
+    uart_puts("Memory test: wrote 0x12345678, read 0x");
+    uart_hex(read_val);
     uart_puts("\r\n");
     
+    if (read_val == 0x12345678) {
+        uart_puts("Basic memory access: SUCCESS\r\n");
+        
+        // Now try FreeRTOS heap allocation
+        uart_puts("Testing FreeRTOS heap allocation...\r\n");
+        void *test_ptr = pvPortMalloc(100);
+        uart_puts("Test allocation (100 bytes): ");
+        if (test_ptr) {
+            uart_puts("SUCCESS at 0x");
+            uart_hex((unsigned int)test_ptr);
+            uart_puts("\r\n");
+            // Note: heap_1 doesn't support freeing memory
+            uart_puts("Note: Using heap_1 - memory cannot be freed\r\n");
+        } else {
+            uart_puts("FAILED\r\n");
+        }
+    } else {
+        uart_puts("Basic memory access: FAILED - memory not writable\r\n");
+    }
+    
+    uart_puts("Free heap size: ");
+    uart_decimal(xPortGetFreeHeapSize());
+    uart_puts(" bytes\r\n");
+    uart_puts("Minimum ever free: ");
+    uart_decimal(xPortGetMinimumEverFreeHeapSize());
+    uart_puts(" bytes\r\n");
+    
+    uart_puts("Stack sizes requested:\r\n");
+    uart_puts("  MemPattern: ");
+    uart_decimal(configMINIMAL_STACK_SIZE * 4 * sizeof(StackType_t));
+    uart_puts(" bytes\r\n");
+    uart_puts("  PLC: ");
+    uart_decimal(configMINIMAL_STACK_SIZE * 2 * sizeof(StackType_t));
+    uart_puts(" bytes\r\n");
+    uart_puts("  Demo: ");
+    uart_decimal(configMINIMAL_STACK_SIZE * sizeof(StackType_t));
+    uart_puts(" bytes\r\n");
+    
+    // Create multiple tasks like a real system
+    uart_puts("=== CREATING MEMORY PATTERN TASK ===\r\n");
+    uart_puts("About to call xTaskCreate for MemPattern...\r\n");
+    BaseType_t result1 = xTaskCreate(vMemoryPatternTask, "MemPattern", configMINIMAL_STACK_SIZE * 4, NULL, 3, NULL);
+    uart_puts("xTaskCreate returned!\r\n");
+    uart_puts("Memory Pattern task creation result: ");
+    uart_decimal(result1);
+    if (result1 == pdPASS) {
+        uart_puts(" (SUCCESS)\r\n");
+    } else {
+        uart_puts(" (FAILED - insufficient heap memory)\r\n");
+    }
+    uart_puts("Free heap after task 1: ");
+    uart_decimal(xPortGetFreeHeapSize());
+    uart_puts(" bytes\r\n");
+    
+    uart_puts("=== CREATING PLC TASK ===\r\n");
     BaseType_t result2 = xTaskCreate(vPLCMain, "PLC", configMINIMAL_STACK_SIZE * 2, NULL, 2, NULL);
     uart_puts("PLC task creation result: ");
     uart_decimal(result2);
-    uart_puts("\r\n");
+    if (result2 == pdPASS) {
+        uart_puts(" (SUCCESS)\r\n");
+    } else {
+        uart_puts(" (FAILED - insufficient heap memory)\r\n");
+    }
+    uart_puts("Free heap after task 2: ");
+    uart_decimal(xPortGetFreeHeapSize());
+    uart_puts(" bytes\r\n");
     
+    uart_puts("=== CREATING DEMO TASK ===\r\n");
     BaseType_t result3 = xTaskCreate(vDemoTask, "Demo", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
     uart_puts("Demo task creation result: ");
     uart_decimal(result3);
-    uart_puts("\r\n");
+    if (result3 == pdPASS) {
+        uart_puts(" (SUCCESS)\r\n");
+    } else {
+        uart_puts(" (FAILED - insufficient heap memory)\r\n");
+    }
+    uart_puts("Free heap after task 3: ");
+    uart_decimal(xPortGetFreeHeapSize());
+    uart_puts(" bytes\r\n");
     
     uart_puts("Starting FreeRTOS scheduler...\r\n");
     uart_puts("Tasks will begin running momentarily...\r\n");
@@ -296,3 +376,15 @@ int main(void) {
         uart_puts("System halted.\r\n");
     };
 }
+
+// Required idle hook function for FreeRTOS
+void vApplicationIdleHook(void) {
+    static uint32_t idle_counter = 0;
+    
+    // Simple heartbeat every ~1 million idle cycles
+    if ((idle_counter & 0xFFFFF) == 0) {
+        uart_puts(".");  // Minimal heartbeat
+    }
+    idle_counter++;
+}
+
